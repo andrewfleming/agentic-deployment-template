@@ -2,10 +2,10 @@
 # Adds the agentic deployment template to an existing repository.
 #
 # Usage (run from the root of your target repo):
-#   bash <(curl -fsSL https://raw.githubusercontent.com/whyisjake/agentic-workflow-template/main/scripts/setup.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/whyisjake/agentic-deployment-template/main/scripts/setup.sh)
 #
 # Or clone and run locally:
-#   bash /path/to/agentic-workflow-template/scripts/setup.sh
+#   bash /path/to/agentic-deployment-template/scripts/setup.sh
 #
 # Installing from a fork or a mirror:
 #   Set TEMPLATE_REPO_URL to the raw base URL of the copy you want, and
@@ -51,8 +51,8 @@
 set -euo pipefail
 
 REPO_URL_EXPLICIT="${TEMPLATE_REPO_URL:+yes}"
-REPO_URL="${TEMPLATE_REPO_URL:-https://raw.githubusercontent.com/whyisjake/agentic-workflow-template/main}"
-DOCS_URL="${TEMPLATE_DOCS_URL:-https://github.com/whyisjake/agentic-workflow-template}"
+REPO_URL="${TEMPLATE_REPO_URL:-https://raw.githubusercontent.com/whyisjake/agentic-deployment-template/main}"
+DOCS_URL="${TEMPLATE_DOCS_URL:-https://github.com/whyisjake/agentic-deployment-template}"
 TEMPLATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || true
 
 # Decide where files come from once, up front, instead of per file.
