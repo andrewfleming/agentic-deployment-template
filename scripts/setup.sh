@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Adds the agentic workflow template to an existing repository.
+# Adds the agentic deployment template to an existing repository.
 #
 # Usage (run from the root of your target repo):
 #   bash <(curl -fsSL https://raw.githubusercontent.com/whyisjake/agentic-workflow-template/main/scripts/setup.sh)
@@ -117,7 +117,7 @@ if [[ ! -d ".git" ]]; then
 fi
 
 bold ""
-bold "Agentic Workflow Template — Setup"
+bold "Agentic Deployment Template — Setup"
 echo  "Adding agent-ready workflow files to: $(basename "$(pwd)")"
 echo  "Installing from: $SOURCE_DESC"
 echo  ""
@@ -389,7 +389,7 @@ echo "     git status"
 echo ""
 echo "  2. Commit:"
 echo "     git add .github/ docs/"
-echo "     git commit -m 'chore: add agentic workflow template'"
+echo "     git commit -m 'chore: add agentic deployment template'"
 echo "     git push"
 echo ""
 echo "  3. Sync labels (run once after pushing):"

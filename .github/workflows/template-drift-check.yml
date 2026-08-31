@@ -41,7 +41,7 @@ jobs:
     # Only the enterprise copy can do this. A runner there can reach github.com;
     # a public runner cannot reach the enterprise host, so the same job there
     # could only compare that copy against itself.
-    if: github.repository == 'Automattic/agentic-workflow-template'
+    if: github.repository == 'Automattic/agentic-deployment-template'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

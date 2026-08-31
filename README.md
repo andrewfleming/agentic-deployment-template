@@ -1,4 +1,4 @@
-# Agentic Workflow Template
+# Agentic Deployment Template
 
 A GitHub template repository that brings structured, agent-assisted development to any codebase. Drop it into your repository to get issue templates, automated labeling, and AI agent workflows that route to **Claude Code**, **OpenAI Codex**, **GitHub Copilot**, or a **custom agent** — all configured with a single repository variable.
 
