@@ -26,7 +26,8 @@
 #   - Adds .github/workflows/  (all agent workflow files, skips any that already exist)
 #   - Adds .github/agents/issue-screener.agent.md
 #   - Adds scripts/validate-workflows.sh  (the workflow YAML + permission guard)
-#   - Adds .github/actions/claude-run/       (the shared agent invocation)
+#   - Adds .github/actions/claude-run/       (the shared Claude invocation)
+#   - Adds .github/actions/codex-run/        (the shared Codex invocation)
 #   - Adds .github/actions/screen-issue/     (the shared issue structure check)
 #   - Creates docs/ if it doesn't exist
 #   - Sets the AGENT_PROVIDER repository variable, and reports on the secret
@@ -177,6 +178,7 @@ WORKFLOW_FILES=(
   ".github/workflows/issue-screener.yml"
   ".github/workflows/validate-workflows.yml"
   ".github/workflows/claude-pr-feedback.yml"
+  ".github/workflows/codex-pr-feedback.yml"
 )
 
 for file in "${WORKFLOW_FILES[@]}"; do
@@ -197,15 +199,20 @@ else
   green "  added: .github/agents/issue-screener.agent.md"
 fi
 
-# ── Composite action ──────────────────────────────────────────────────────────
-# The workflows call ./.github/actions/claude-run rather than the upstream
-# action directly, so the permission mode and allow list have one definition.
-# A repo that gets the workflows without this directory has three workflows
+# ── Composite actions ─────────────────────────────────────────────────────────
+# The workflows call ./.github/actions/claude-run and ./.github/actions/codex-run
+# rather than the upstream actions directly, so the permission mode, allow list
+# and sandbox have one definition each.
+# A repo that gets the workflows without these directories has workflows
 # referencing an action that does not exist, and every agent run fails at
 # startup — so this is not optional and is installed even if it already exists
 # in some other form.
+#
+# Both providers' actions are installed regardless of AGENT_PROVIDER. An unused
+# composite action costs nothing; a missing one costs a failed run at the moment
+# someone switches provider, which is the worst time to discover it.
 
-for action in claude-run screen-issue; do
+for action in claude-run codex-run screen-issue; do
   if [[ -f ".github/actions/$action/action.yml" ]]; then
     yellow "  skipped (already exists): .github/actions/$action/action.yml"
   else
@@ -268,8 +275,8 @@ else
   if [[ -z "$provider" ]]; then
     if [[ -t 0 ]]; then
       echo "  Which agent should run agent-ready issues?"
-      echo "    1) claude        — the only provider implemented"
-      echo "    2) openai-codex  — NOT IMPLEMENTED: a stub you must write yourself"
+      echo "    1) claude        — implemented; needs the Claude GitHub App as well"
+      echo "    2) openai-codex  — implemented; needs OPENAI_API_KEY, no app to install"
       echo "    3) copilot       — NOT IMPLEMENTED: a stub you must write yourself"
       echo "    4) custom        — repository_dispatch only; you write the listener"
       choice=""
@@ -320,17 +327,17 @@ else
 
   # Say plainly when the chosen provider does not do anything yet.
   #
-  # Only the claude path is implemented. openai-codex and copilot are stub jobs
-  # that echo and exit; custom dispatches a repository_dispatch event and needs a
-  # listener that does not exist yet. Either way the repo installs cleanly, syncs
-  # its labels, goes green, and then produces nothing the first time someone
-  # labels an issue.
+  # claude and openai-codex are implemented. copilot is a stub job that echoes
+  # and exits; custom dispatches a repository_dispatch event and needs a listener
+  # that does not exist yet. Either way the repo installs cleanly, syncs its
+  # labels, goes green, and then produces nothing the first time someone labels
+  # an issue.
   #
-  # This is one of two places that says so — the stub jobs themselves now comment
-  # on the issue and fail, which is the signal that reaches someone who never ran
+  # This is one of two places that says so — the stub job itself also comments on
+  # the issue and fails, which is the signal that reaches someone who never ran
   # this script.
   case "$provider" in
-    openai-codex|copilot)
+    copilot)
       echo ""
       red   "  '$provider' is not implemented — its job is a stub."
       echo  "  trigger-$provider in .github/workflows/agent-ready-trigger.yml echoes a"
@@ -340,6 +347,17 @@ else
       echo  "  For a working agent, re-run with: AGENT_PROVIDER=claude bash scripts/setup.sh"
       echo ""
       PROVIDER_NEXT_STEP="Provider is $provider, which is a stub — implement trigger-$provider, or switch to claude."
+      ;;
+    openai-codex)
+      echo ""
+      green "  'openai-codex' is implemented."
+      echo  "  trigger-openai-codex runs openai/codex-action through"
+      echo  "  .github/actions/codex-run, with the same complexity routing as claude."
+      echo  "  Unlike claude there is no GitHub App to install — the OPENAI_API_KEY"
+      echo  "  secret is the whole credential."
+      echo  "  Worth knowing: pull requests it opens use the workflow token, so they"
+      echo  "  arrive without CI runs on them."
+      echo ""
       ;;
     custom)
       echo ""
@@ -355,14 +373,10 @@ else
 
   # Report on the secret. Never set it.
   secret="$(secret_for_provider "$provider")"
-  if [[ "$provider" != "claude" && -n "$secret" ]]; then
-    # Name it without failing on it. trigger-openai-codex really does read
-    # secrets.OPENAI_API_KEY, so staying silent here would trade one silent gap
-    # for another — but the job is a stub, so a missing secret is not yet what
-    # stops it working.
-    dim "  Not checking for $secret — the stub never gets far enough to read it."
-    dim "  You will need it once you write the job."
-  elif [[ -z "$secret" ]]; then
+  # Both providers that name a secret — claude and openai-codex — are
+  # implemented, so both get a real check. The stub providers name no secret and
+  # fall through to the branch below.
+  if [[ -z "$secret" ]]; then
     dim "  Provider '$provider' has no single required secret — its credentials are yours to wire up."
   else
     if [[ "$variable_set" == "yes" ]] && gh secret list 2>/dev/null | awk '{print $1}' | grep -qx "$secret"; then

@@ -129,6 +129,14 @@ green "All $checked workflow file(s) parse."
 # git and gh are deliberately absent from the denylist: the agent cannot
 # commit or open a pull request without them. That is a known, documented
 # exception, not an oversight — see docs/AGENTIC_DEVELOPMENT.md.
+#
+# This checks Claude's allow list only, and cannot check Codex's. The two
+# providers express the same concern in incompatible shapes: claude-run lists
+# permitted commands as Bash(...) entries, while codex-run sets a coarse
+# `sandbox:` mode with no per-command granularity to inspect. There is nothing
+# here to grep for in the Codex path — a widened Codex sandbox is a one-word
+# edit this script cannot see. Reviewing .github/actions/codex-run/action.yml
+# by eye is currently the only guard on it.
 
 DENIED_PATTERN='(find|xargs|curl|wget|nc|ssh|eval|sh|bash|zsh|python|python3|node|perl|ruby|php|env|chmod)'
 
@@ -203,7 +211,7 @@ check_timeouts() {
         bad=1
       fi
     done < <(grep -h "timeout-minutes:" "$f" 2>/dev/null | grep -v "^\s*#")
-  done < <(grep -rl "claude-run\|claude-code-action" "$WORKFLOW_DIR" 2>/dev/null | sort)
+  done < <(grep -rl "claude-run\|claude-code-action\|codex-run\|codex-action" "$WORKFLOW_DIR" 2>/dev/null | sort)
 
   if [[ "$bad" -gt 0 ]]; then
     echo ""

@@ -21,7 +21,7 @@ This guide teaches you how to write issues that agents can actually execute, how
 | Provider | AGENT_PROVIDER value | Required secret | Notes |
 |----------|---------------------|-----------------|-------|
 | Claude + Compound Engineering | `claude` (default) | `CLAUDE_CODE_OAUTH_TOKEN` + the Claude GitHub App | Implemented — complexity-aware, planning phase for high complexity |
-| OpenAI Codex | `openai-codex` | `OPENAI_API_KEY`, once you write the job | **Not implemented** — `trigger-openai-codex` echoes and exits |
+| OpenAI Codex | `openai-codex` | `OPENAI_API_KEY` | Implemented — same complexity routing; no GitHub App required |
 | GitHub Copilot (gh-aw) | `copilot` | _(gh-aw setup)_ | **Not implemented** — `trigger-copilot` echoes and exits || Custom / bring-your-own | `custom` | _(your own)_ | Dispatches `repository_dispatch` event; add your listener |
 
 Set `AGENT_PROVIDER` in **Settings → Secrets and variables → Variables**. If not set, the workflow defaults to `claude`.
@@ -445,9 +445,22 @@ When reviewing agent-generated code, focus on:
 
 ---
 
+## The Codex provider needs one thing, not two
+
+Where Claude needs a secret *and* an app, Codex needs only `OPENAI_API_KEY`. `openai/codex-action` starts a Responses API proxy with that key and drives the Codex CLI behind it; GitHub access comes from the ordinary workflow token, handed to the agent as `GH_TOKEN`.
+
+Two consequences follow from having no app:
+
+- **The agent's pull requests arrive with no CI.** GitHub does not start workflow runs from events caused by the workflow token. Claude's path dodges this through the Claude GitHub App; there is no Codex equivalent, so either accept PRs without checks or pass a personal access token into `codex-run`.
+- **Run reporting is thinner.** `codex-action` exposes a single `final-message` output — no turn count, no cost, no permission-denial count. The job summary prints the agent's closing message instead. The "the agent produced no pull request" report still works, because it asks GitHub whether a PR exists rather than asking the agent.
+
+The sandbox also differs in kind. `claude-run` lists permitted commands individually (`Bash(git *)`, `Bash(npm test)`); `codex-run` sets one coarse `sandbox:` mode, because Codex has no per-command allow list to express the same thing. `scripts/validate-workflows.sh` can police the former and cannot police the latter — a widened Codex sandbox is a one-word edit no script here will catch, so review `.github/actions/codex-run/action.yml` by eye when it changes.
+
+---
+
 ## Extending Provider Stubs
 
-The `openai-codex` and `copilot` jobs in `agent-ready-trigger.yml` are intentional stubs. To activate them:
+The `copilot` job in `agent-ready-trigger.yml` is an intentional stub. To activate it:
 
 1. Open `.github/workflows/agent-ready-trigger.yml`
 2. Find the stub job for your provider (search for `# TODO: extend`)

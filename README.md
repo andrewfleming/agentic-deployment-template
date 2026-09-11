@@ -60,11 +60,16 @@ Actions → Setup Labels → Run workflow
 | Value | Status | Required secret | Also needs |
 |-------|--------|-----------------|------------|
 | `claude` (default) | Implemented | `CLAUDE_CODE_OAUTH_TOKEN` | the Claude GitHub App — Step 4 |
-| `openai-codex` | **Not implemented** — stub job | `OPENAI_API_KEY`, once you write the job | — |
+| `openai-codex` | Implemented | `OPENAI_API_KEY` | nothing — no app to install |
 | `copilot` | **Not implemented** — stub job | _(gh-aw setup required — see docs)_ | — |
 | `custom` | `repository_dispatch` only | _(your own listener — see docs)_ | — |
 
-Only `claude` runs an agent today. The `openai-codex` and `copilot` jobs echo a message and exit; `custom` fires a `repository_dispatch` event that does nothing until you add a listener workflow in the same repo. Either way a repo configured for one of them installs cleanly and goes green while labelling an issue produces nothing. `setup.sh` says so when you pick one, and the run itself now fails rather than passing quietly.
+`claude` and `openai-codex` both run a real agent, with the same complexity routing, the same structural screening, and the same write-access gate. The `copilot` job echoes a message and exits; `custom` fires a `repository_dispatch` event that does nothing until you add a listener workflow in the same repo. Either way a repo configured for one of those two installs cleanly and goes green while labelling an issue produces nothing. `setup.sh` says so when you pick one, and the run itself fails rather than passing quietly.
+
+**Two differences between the implemented providers**, both worth knowing before you choose:
+
+- **Claude needs a GitHub App; Codex does not.** That app is also what gets the agent's pull request a CI run (Step 4). Codex authenticates to OpenAI with `OPENAI_API_KEY` and talks to GitHub with the workflow token — and **a PR opened with the workflow token does not start workflow runs**, so Codex's pull requests arrive without checks on them. Pass a PAT if that matters to you.
+- **Run reporting is thinner under Codex.** `anthropics/claude-code-action` returns an execution log carrying turn count, cost and permission-denial count, all of which the job summary reports. `openai/codex-action` returns only the agent's final message, so there are no run statistics to show. The "agent produced no pull request" report works for both — it asks GitHub, not the agent.
 
 If `AGENT_PROVIDER` is not set, the workflow defaults to `claude`.
 
@@ -132,7 +137,7 @@ bash scripts/validate-workflows.sh
 | Provider | Status | Notes |
 |----------|--------|-------|
 | **Claude + Compound Engineering** | Implemented | Complexity-aware: high issues plan first, low/medium execute directly |
-| **OpenAI Codex** | **Not implemented** — stub job | Write `trigger-openai-codex` in `.github/workflows/agent-ready-trigger.yml` |
+| **OpenAI Codex** | Implemented | Same complexity routing via `openai/codex-action`; no GitHub App, no run statistics, PRs arrive without CI |
 | **GitHub Copilot (gh-aw)** | **Not implemented** — stub job | Write `trigger-copilot`; requires `gh aw compile` setup |
 | **Custom** | `repository_dispatch` only | Dispatches the issue payload; wire your own listener in the same repo |
 

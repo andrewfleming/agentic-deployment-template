@@ -116,13 +116,90 @@ jobs:
               core.setOutput('already_running', 'false');
             }
 
+      # Two steps, one per provider, and the provider condition is load-bearing.
+      #
+      # This file had no provider check at all until Codex was added: it called
+      # claude-run unconditionally, so a repository set to AGENT_PROVIDER=
+      # openai-codex would have Codex write the plan and Claude implement it.
+      # Whichever agent planned the work should be the one that carries it out.
       - name: Run Claude Code — implement the approved plan
         if: |
           steps.permission-check.outputs.allowed == 'true' &&
-          steps.pr-check.outputs.already_running == 'false'
+          steps.pr-check.outputs.already_running == 'false' &&
+          (vars.AGENT_PROVIDER == 'claude' || vars.AGENT_PROVIDER == '')
         uses: ./.github/actions/claude-run
         with:
           oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          report_issue_number: ${{ github.event.issue.number }}
+          github_token: ${{ github.token }}
+          prompt: |
+            You are implementing issue #${{ github.event.issue.number }}.
+
+            Issue title: ${{ github.event.issue.title }}
+
+            A human has approved the plan for this issue. Your job is to implement it.
+
+            Instructions:
+            1. The approved plan is on the branch plan/issue-${{ github.event.issue.number }},
+               which is NOT merged into this branch. Read it from there:
+                 git show origin/plan/issue-${{ github.event.issue.number }} --stat
+                 git checkout origin/plan/issue-${{ github.event.issue.number }} -- docs/plans/
+               If that branch does not exist, look for a recent file in docs/plans/ instead.
+            2. If a plan file exists, read it in full and implement it. Work through
+               its implementation units in order, and carry the plan file itself into
+               your branch so the reasoning ships alongside the code
+            3. If no plan file exists, say so in a comment on the issue before you
+               implement anything — an approved plan that cannot be found is worth
+               reporting, not working around silently
+            4. Implement the feature per the plan or issue
+            5. Open a PR using the agent-generated PR template
+            6. Add the 'agent-generated' label to the PR
+
+            Important:
+            - Stay within the issue's defined scope ("Out of scope" is a hard boundary)
+            - Reference the issue number in the PR: "Closes #${{ github.event.issue.number }}"
+            - If blocked or uncertain, comment on the issue asking for clarification
+
+
+            WRITING GITHUB ACTIONS WORKFLOW FILES:
+
+            Write every run: as a block scalar (run: |) by default. In a plain
+            run: line, a colon followed by a space is parsed as a mapping and the
+            whole file stops being valid YAML. Quoting does not save you — the
+            outer scalar is still plain:
+
+                run: echo $(( x > 0 ? 1 : 0 ))     # breaks
+                run: git commit -m "fix: thing"    # breaks too
+
+                run: |                             # fine
+                  git commit -m "fix: thing"
+
+            GitHub cannot schedule a job from a file it could not read, so the
+            run ends in seconds with no jobs and no log. That reads as broken
+            code rather than broken YAML.
+
+            Before opening the PR, if you added or changed anything under
+            .github/workflows/, run:
+
+                bash scripts/validate-workflows.sh
+
+            Fix what it reports and run it again. Do not open the PR while it
+            is failing.
+
+            If this repository depends on code you cannot read from here — a private
+            dependency, an API you cannot reach — do NOT guess its contract. Implement
+            what you can, and state the unverified assumption plainly in the PR body (or
+            in the plan) so a reviewer can check it. A confident PR built on a guessed
+            interface passes review and fails in production.
+
+      - name: Run Codex — implement the approved plan
+        if: |
+          steps.permission-check.outputs.allowed == 'true' &&
+          steps.pr-check.outputs.already_running == 'false' &&
+          vars.AGENT_PROVIDER == 'openai-codex'
+        uses: ./.github/actions/codex-run
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           report_issue_number: ${{ github.event.issue.number }}
           github_token: ${{ github.token }}
           prompt: |

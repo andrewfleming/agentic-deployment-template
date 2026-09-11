@@ -9,8 +9,9 @@
 #
 # Provider note: this is specific to the `claude` provider (it uses
 # anthropics/claude-code-action). The job no-ops unless AGENT_PROVIDER is `claude`
-# (or unset, which defaults to claude elsewhere in the template). If you use another
-# provider, add an equivalent feedback workflow for that tool.
+# (or unset, which defaults to claude elsewhere in the template). The openai-codex
+# equivalent is codex-pr-feedback.yml, which listens for `@codex`; exactly one of
+# the two runs in any given repository.
 #
 # Authorization: it fires only on "@claude" comments from a collaborator with write/admin
 # access (a permission gate runs before checkout — see the step below). Without it, on a
