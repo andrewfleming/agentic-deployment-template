@@ -1,43 +1,51 @@
 name: "Run Codex"
 description: >-
-  Invokes openai/codex-action with this repository's agreed sandbox and
-  reporting. The openai-codex counterpart to ./.github/actions/claude-run.
+  Runs the Codex agent with this repository's agreed sandbox settings, and
+  reports what the run produced. Used by every workflow here that invokes Codex.
 
-# Why this exists
+# What this is
 #
-# Same reason as claude-run: the invocation is duplicated across three call
-# sites (direct execution, planning phase, plan implementation, PR feedback),
-# and a drifted sandbox setting is a security problem rather than an
-# inconvenience. The issue body is untrusted input that reaches the model as
-# instructions, so what the run is permitted to do belongs in one file.
+# A single definition of how this repository runs the Codex agent. Four
+# workflows need to invoke it — implementing an issue directly, writing a plan
+# for a complex one, implementing an approved plan, and responding to a review
+# comment on an open pull request — and all four call this action rather than
+# `openai/codex-action` directly.
 #
-# How this differs from claude-run, and why
+# The reason to centralise it is the sandbox setting below. An agent run takes
+# an issue or comment body as its instructions, and that text is written by
+# whoever opened the issue. What the run is then permitted to do is a security
+# boundary, and a boundary defined in four places is one that eventually
+# disagrees with itself.
 #
-# `openai/codex-action` is a thinner wrapper than `anthropics/claude-code-action`.
-# Three things Claude's action does for free have to be done here:
+# Things a reader may not expect
 #
-#   1. Tag mode. Claude's action takes a `trigger_phrase` and works out the
-#      instruction from the comment that fired it. Codex's takes a prompt and
-#      nothing else, so the shim below extracts it.
+# `openai/codex-action` is a thin wrapper around the Codex CLI. It runs the
+# agent and returns what the agent said. It does not know about pull requests,
+# comments, or the event that triggered the workflow, so three jobs that might
+# look like the action's are done here instead:
 #
-#   2. Run telemetry. Claude's action writes an execution log carrying
-#      num_turns, total_cost_usd and permission_denials_count. Codex's single
-#      output is `final-message` — there is no turn count, no cost, and no
-#      denial count to report, because Codex's sandbox refuses commands
-#      silently rather than tallying them. The summary below is correspondingly
-#      thinner. That is a real difference in what the two tools expose, not a
-#      gap waiting to be filled in.
+#   1. Working out the prompt. When this action is called without one, it
+#      builds the prompt from the comment that triggered the run. The upstream
+#      action has no concept of a trigger phrase.
 #
-#   3. GitHub credentials. Claude's action exchanges an OIDC token for a
-#      GitHub App installation token. Codex has no app: it gets GH_TOKEN in the
-#      environment and uses the `gh` CLI like any other process.
+#   2. Reporting. The action's only output is the agent's closing message.
+#      There is no turn count, token usage or cost figure available to report,
+#      so the job summary shows that message and nothing more. A thin summary
+#      here reflects what the upstream action exposes; it is not a piece of
+#      this file left unfinished.
+#
+#   3. GitHub credentials. The agent opens pull requests using the `gh` CLI,
+#      which needs a token in its environment. That token is passed in as an
+#      input and exported below.
 #
 # Credentials arrive as inputs because a composite action cannot read the
-# `secrets` context. Callers pass `${{ secrets.OPENAI_API_KEY }}`.
+# `secrets` context of the workflow that calls it. Callers pass
+# `${{ secrets.OPENAI_API_KEY }}`.
 #
-# `timeout-minutes` stays in the calling job, for the same reason it does in
-# claude-run: GitHub Actions silently ignores it on a step inside a composite
-# action. scripts/validate-workflows.sh checks the job-level values agree.
+# `timeout-minutes` is deliberately absent here and set by each calling job
+# instead: GitHub Actions ignores that key on a step inside a composite action,
+# so setting it here would look effective and do nothing.
+# scripts/validate-workflows.sh checks the calling jobs agree on a value.
 
 inputs:
   openai_api_key:
@@ -70,16 +78,18 @@ inputs:
 runs:
   using: composite
   steps:
-    # ── Tag mode ──────────────────────────────────────────────────────────────
+    # ── Work out what the agent was asked to do ───────────────────────────────
     #
-    # Claude's action reads `trigger_phrase` itself. Codex's does not, so when
-    # the caller passes no prompt this reconstructs one from the event that
-    # fired the run.
+    # Most callers pass an explicit prompt. The pull request feedback workflow
+    # does not: there, the instruction is whatever a reviewer typed after the
+    # trigger phrase in a comment, so it has to be read out of the event that
+    # started the run.
     #
-    # The comment body is untrusted: whoever can comment can write what lands
-    # here. The permission gate in the calling workflow is what bounds that —
-    # it runs before this action and stops non-collaborators. Nothing in this
-    # step should be read as sanitising the text.
+    # That text is untrusted. Anyone who can comment decides what it says, and
+    # it becomes the agent's instructions verbatim. What limits the damage is
+    # the permission check in the calling workflow, which refuses anyone
+    # without write access before this action is reached. Nothing in this step
+    # filters or sanitises the text, and it should not be read as doing so.
     - name: Work out the prompt
       id: resolve
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -130,52 +140,54 @@ runs:
       id: codex
       uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1.12
       env:
-        # Codex opens the pull request itself, with `gh`. Claude's action gets
-        # this from its App token exchange; Codex has no app, so the token is
-        # handed to the process directly.
+        # The agent opens its own pull request by running `gh`, which reads its
+        # credentials from this variable.
         #
-        # Worth knowing before you debug a missing CI run: a pull request
-        # opened with GITHUB_TOKEN does not start workflow runs. The agent's PR
-        # will arrive with no CI on it. Claude's path avoids this via the Claude
-        # GitHub App; there is no equivalent for Codex, so either accept it or
-        # pass a PAT from the calling workflow.
+        # Worth knowing before anyone debugs a missing CI run: GitHub does not
+        # start workflow runs from events caused by the built-in workflow token.
+        # A pull request opened by this agent therefore arrives with no checks
+        # on it. To get CI on agent pull requests, pass a personal access token
+        # as `github_token` from the calling workflow instead.
         GH_TOKEN: ${{ inputs.github_token }}
       with:
         openai-api-key: ${{ inputs.openai_api_key }}
         prompt: ${{ steps.resolve.outputs.prompt }}
 
-        # Full filesystem and network access on the runner.
+        # Full filesystem and network access, inside the throwaway container
+        # GitHub creates for this job and destroys when it ends.
         #
-        # This is broader than claude-run's allow list looks, and narrower than
-        # it sounds. The agent has to reach the network — `git push` and
-        # `gh pr create` are the entire point of the run — and Codex's sandbox
-        # modes are coarse: read-only, workspace-write, or this. There is no
-        # per-command allow list to express "git and gh but nothing else",
-        # which is the shape claude-run uses.
+        # This is permissive, and the name is meant to make you look twice, so
+        # it is worth stating why it is set. The run exists to push a branch and
+        # open a pull request, so it needs the network. The sandbox choices are
+        # coarse — read-only, workspace-write, or this — with no way to say
+        # "network access for git and gh, nothing else". Of the three, this is
+        # the only one that lets the run finish its job.
+        #
+        # So this setting is not what keeps an agent run safe. What keeps it
+        # safe is that only a repository collaborator with write access can
+        # start one: every workflow that calls this action checks that first,
+        # before any agent code runs. Read that check as the real boundary and
+        # this line as a consequence of it.
         #
         # A narrower `permission-profile` (a config.toml under `codex-home`)
-        # is the real answer and is deliberately not attempted here: getting it
-        # wrong silently grants more than intended, and it should be written
-        # against an observed run rather than from the documentation. Until
-        # then the boundary is the same one claude-run names in its own
-        # comments — the allow list was never the sandbox, and what actually
-        # bounds a run is who can cause one to start. That gate lives in the
-        # calling workflow and runs before this action.
+        # can express more, and is worth adopting. It is not used here because
+        # a profile that is subtly wrong grants more than intended while
+        # appearing to grant less, and it should be written against a run you
+        # have watched rather than from the documentation alone.
         sandbox: danger-full-access
 
-        # Leaves the current user out of the sudo group before running Codex.
-        # The action's own default; named explicitly so a change is a visible
-        # edit rather than an upstream default moving under us.
+        # Removes the running user from the sudo group before starting the
+        # agent. This is already the upstream action's default; it is written
+        # out so that changing it requires a visible edit to this file, rather
+        # than happening quietly if that default is ever changed upstream.
         safety-strategy: drop-sudo
 
     # ── Report what the run actually did ──────────────────────────────────────
     #
-    # Thinner than claude-run's equivalent, and it has to be: `final-message`
-    # is the only thing this action returns. There is no cost, no turn count
-    # and no permission-denial count — see the header.
-    #
-    # The agent's own closing message is still worth surfacing. It is where a
-    # run that gave up explains itself, and the job log is where nobody looks.
+    # The agent's closing message is the only thing the upstream action returns,
+    # and it is worth putting somewhere visible: it is where a run that gave up
+    # explains itself. Without this step that explanation exists only in the raw
+    # job log, which nobody reads unless they already suspect a problem.
     - name: Summarise the run
       if: always()
       shell: bash
@@ -205,14 +217,14 @@ runs:
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
 
-    # A run that produced no pull request is the failure mode that costs the
-    # most confidence, because nothing anywhere says so. The job is green, the
-    # issue is silent, and whoever labelled it is waiting for a PR that is not
-    # coming.
+    # An agent can finish, report success, and produce nothing. That is the
+    # failure worth catching here, because nothing else reports it: the job is
+    # green, the issue stays silent, and whoever asked for the work waits for a
+    # pull request that is never coming.
     #
-    # This check is provider-agnostic — it asks GitHub whether a PR referencing
-    # the issue exists — so it is deliberately identical to claude-run's. Keep
-    # them that way.
+    # The check asks GitHub whether an open pull request references the issue,
+    # rather than asking the agent whether it opened one. An agent that has
+    # lost track of what it did is exactly the case this needs to catch.
     - name: Say so when the run produced nothing
       if: always() && inputs.report_issue_number != '' && inputs.github_token != ''
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

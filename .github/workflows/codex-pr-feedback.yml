@@ -1,29 +1,30 @@
-# Lets a human revise an OPEN pull request by mentioning the agent in a comment.
+# Revises an open pull request when a reviewer asks the agent to, in a comment.
 #
-# The openai-codex counterpart to claude-pr-feedback.yml. When a reviewer comments
-# "@codex <instruction>" on a PR — or leaves it in a PR review — Codex checks out
-# the PR's head branch, makes the requested change, and pushes back to the same
-# branch.
+# Comment "@codex <instruction>" on a pull request, or write it in a review, and
+# the agent checks out that pull request's branch, makes the change, and pushes
+# back to the same branch. The rest of this template is one-shot per issue; this
+# is the loop that lets a reviewer ask for a revision without starting over.
 #
-# Provider note: the job no-ops unless AGENT_PROVIDER is `openai-codex`. The
-# claude equivalent no-ops unless the provider is `claude`, so exactly one of the
-# two runs in any given repository.
+# Runs only when the AGENT_PROVIDER repository variable is set to openai-codex.
+# A separate workflow does the same job for the Claude provider, listening for a
+# different phrase, so only one of the two is ever active in a repository.
 #
-# Authorization: it fires only on "@codex" comments from a collaborator with
-# write/admin access (a permission gate runs before checkout). Without it, on a
-# public repo any user could drive the agent.
+# Who can use it: only collaborators with write or admin access. The check runs
+# before the repository is checked out. Without it, on a public repository any
+# passer-by could direct an agent that can write to the code.
 #
-# Loop safety: it fires only on comments that literally contain "@codex". The
-# agent's own progress/summary comments don't, so they create a run that
-# immediately skips — no self-triggering loop.
+# Why it does not trigger itself: it fires only on comments containing the
+# literal phrase "@codex". The agent's own progress and summary comments do not
+# contain it, so they start a run that immediately skips.
 #
-# What this has to do that claude-pr-feedback.yml does not:
+# Something a reader may not expect:
 #
-#   Checking out the right branch. An issue_comment event checks out the default
-#   branch, not the pull request. claude-code-action resolves the PR head itself;
-#   codex-action has no notion of a pull request, so the two steps below look the
-#   head ref up and check it out explicitly. Without them the agent would edit
-#   the default branch and push its "fix" nowhere near the PR.
+#   A comment event does not check out the pull request. GitHub checks out the
+#   repository's default branch, because a comment is not inherently attached to
+#   any branch. The agent used here has no notion of a pull request either. So
+#   the two steps below look up the pull request's branch and check it out by
+#   name. Without them the agent would edit the default branch and push its work
+#   somewhere unrelated to the pull request being discussed.
 
 name: Codex PR Feedback
 
@@ -38,12 +39,13 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-# One run per pull request. Two @codex comments in quick succession, or a comment
-# arriving while a run is already working, would otherwise start a second agent on
-# the same branch. Two agents pushing to one branch is a worse outcome than waiting.
+# One run at a time per pull request. Two requests in quick succession, or one
+# arriving while the agent is still working, would otherwise put two agents on
+# the same branch at once, each overwriting the other's commits.
 #
-# cancel-in-progress is false for the same reason as the trigger: cancelling an
-# agent mid-write loses the work and reports nothing useful.
+# Queued rather than cancelled, deliberately: an agent stopped part-way through
+# editing files leaves nothing behind and reports nothing useful, so waiting a
+# few minutes is the better trade.
 concurrency:
   group: codex-pr-feedback-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
@@ -66,9 +68,9 @@ jobs:
       actions: read
 
     steps:
-      # Authorization gate: only repo collaborators with write/admin may drive the
-      # agent. Without this, on a public repo ANY user could comment "@codex …" and
-      # run an agent with write access. Runs BEFORE checkout.
+      # Only collaborators with write or admin access may direct the agent.
+      # This runs before the repository is checked out, so an unauthorised
+      # request costs nothing and touches nothing.
       - name: Check commenter permissions
         id: permission-check
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -96,13 +98,18 @@ jobs:
             }
             core.setOutput('allowed', allowed ? 'true' : 'false');
 
-      # An issue_comment event carries no head ref, so it has to be looked up.
+      # A comment event does not say which branch the pull request uses, so it
+      # is looked up here.
       #
-      # Fork pull requests are refused rather than handled. The head branch of a
-      # fork PR is attacker-controllable and this job holds a write-scoped token;
-      # checking that branch out and running an agent over it is how a fork PR
-      # becomes write access to the base repository. The permission gate above
-      # bounds who can *ask*, which is not the same as bounding what gets run.
+      # Pull requests from forks are refused rather than handled. Their branch
+      # lives in a repository this one does not control, and its contents can
+      # be changed by whoever owns that fork at any time. Checking it out and
+      # running an agent that holds a write-capable token over it would turn
+      # "can open a pull request" into "can change this repository".
+      #
+      # Note that the permission check above does not cover this. It governs
+      # who may ask for a run, which is a different question from whose code
+      # the run would execute.
       - name: Resolve the pull request's head branch
         id: pr
         if: steps.permission-check.outputs.allowed == 'true'

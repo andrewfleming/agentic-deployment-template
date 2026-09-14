@@ -406,15 +406,19 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # OPENAI CODEX
-  # Complexity-aware execution, mirroring trigger-claude above.
+  # Runs when AGENT_PROVIDER is set to openai-codex. Routes on complexity:
   #
-  # complexity:high  → plan first, human approves by commenting /approve-plan,
-  #                    then plan-approval-gate.yml implements it
-  # complexity:low/medium (or absent) → implement directly
+  # complexity:high  → the agent writes a plan and stops. A person reviews it
+  #                    and comments /approve-plan, which plan-approval-gate.yml
+  #                    picks up and implements.
+  # complexity:low/medium (or no complexity label) → implement directly and
+  #                    open a pull request.
   #
-  # The gates below (write access, label set, structural screen, existing PR)
-  # are deliberately identical to trigger-claude's. They are provider-agnostic
-  # and they are the security boundary — keep the two jobs in step.
+  # The four checks before the agent runs — write access, label set, issue
+  # structure, no existing pull request — are the same ones the Claude job
+  # above performs, and for the same reasons. They decide whether an agent run
+  # should happen at all, which is a question that has nothing to do with which
+  # agent it is. Change one job's checks and the other should change with it.
   # ─────────────────────────────────────────────────────────────────────────────
   trigger-openai-codex:
     if: |
@@ -422,8 +426,9 @@ jobs:
       vars.AGENT_PROVIDER == 'openai-codex'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # No id-token here, unlike trigger-claude: that exists for Claude's OIDC
-    # exchange with the Claude GitHub App. Codex has no app and no exchange.
+    # No id-token permission is requested here. The Claude job above needs one
+    # to exchange for a GitHub App token; this provider has no app and
+    # authenticates with the workflow token directly.
     permissions:
       contents: write
       pull-requests: write
@@ -434,14 +439,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The real trust boundary is here, not in the sandbox. An agent run holds
-      # a write-scoped token and takes the issue body as instructions, so what
-      # bounds it is who can cause one to start.
+      # This check, not the agent's sandbox, is what makes an agent run safe.
       #
-      # codex-action has its own `allow-users` gate. This check stays anyway:
-      # it reports in terms of this repository's own rules, and one gate
-      # silently changing shape upstream should not be the only thing standing
-      # here.
+      # The run holds a token that can write to the repository, and it takes
+      # the issue body as its instructions — text written by whoever opened the
+      # issue. So the question that matters is who is allowed to start one, and
+      # the answer enforced here is: only a collaborator with write access.
+      #
+      # The upstream action offers a similar check of its own. This one stays
+      # regardless, so that the rule is stated in this repository's own files
+      # and does not depend on a third-party default staying as it is.
       - name: Require the labelling actor to have write access
         id: actor
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

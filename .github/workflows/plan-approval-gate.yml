@@ -116,12 +116,14 @@ jobs:
               core.setOutput('already_running', 'false');
             }
 
-      # Two steps, one per provider, and the provider condition is load-bearing.
+      # One step per agent provider, selected by the AGENT_PROVIDER repository
+      # variable. Exactly one of them runs.
       #
-      # This file had no provider check at all until Codex was added: it called
-      # claude-run unconditionally, so a repository set to AGENT_PROVIDER=
-      # openai-codex would have Codex write the plan and Claude implement it.
-      # Whichever agent planned the work should be the one that carries it out.
+      # The condition matters more than it looks. The plan being implemented
+      # here was written by whichever agent the repository is configured to
+      # use, and it is written in the style and assumptions of that agent.
+      # Handing it to a different one to implement produces a plausible-looking
+      # run against a plan its author never intended for it.
       - name: Run Claude Code — implement the approved plan
         if: |
           steps.permission-check.outputs.allowed == 'true' &&
