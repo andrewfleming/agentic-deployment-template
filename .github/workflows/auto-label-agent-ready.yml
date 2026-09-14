@@ -26,7 +26,21 @@ env:
 jobs:
   check-and-label:
     runs-on: ubuntu-latest
+    # contents: read is required, and its absence fails in a way that does not
+    # look like a permissions problem.
+    #
+    # The screening step below is a local composite action, so the repository
+    # has to be checked out before it can run. Naming any permission here sets
+    # every unnamed one to none, which leaves the token unable to read the
+    # repository. On a private repository GitHub answers an unauthorised read
+    # with a 404 rather than a 403, so the checkout reports
+    # "remote: Repository not found" and retries twice before failing — which
+    # reads as a wrong URL or a deleted repository, not a missing scope.
+    #
+    # A public repository checks out fine without it, so this stays working
+    # until the day the template is installed somewhere private.
     permissions:
+      contents: read
       issues: write
 
     steps:
