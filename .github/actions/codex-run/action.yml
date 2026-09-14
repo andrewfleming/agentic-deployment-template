@@ -232,13 +232,43 @@ runs:
         github-token: ${{ inputs.github_token }}
         script: |
           const n = Number('${{ inputs.report_issue_number }}');
+          const MARKER = '<!-- agentic-workflow:run-report -->';
+
           const { data: prs } = await github.rest.pulls.list({
             owner: context.repo.owner, repo: context.repo.repo,
             state: 'open', per_page: 100,
           });
-          const opened = prs.some(pr =>
+          const opened = prs.find(pr =>
             pr.body && new RegExp(`(closes|fixes|resolves)\\s+#${n}\\b`, 'i').test(pr.body));
-          if (opened) return;
+
+          const { data: existing } = await github.rest.issues.listComments({
+            owner: context.repo.owner, repo: context.repo.repo,
+            issue_number: n, per_page: 100,
+          });
+          const mine = existing.find(c => c.body && c.body.includes(MARKER));
+
+          // A pull request exists, so there is nothing to report. Returning
+          // straight away is not enough: an earlier run on this same issue may
+          // have left a report saying no pull request was produced, and that
+          // sentence is now false and sitting on the issue as the newest
+          // automated word on it. Correct it before leaving.
+          if (opened) {
+            if (mine) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: mine.id,
+                body: [
+                  MARKER,
+                  '### Resolved: a pull request was opened',
+                  '',
+                  `A later run produced ${opened.html_url}, so the earlier report here no`,
+                  'longer applies. It has been replaced rather than left in place, because a',
+                  'stale failure notice is worse than no notice at all.',
+                ].join('\n'),
+              });
+            }
+            return;
+          }
 
           const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
@@ -257,14 +287,7 @@ runs:
           ];
 
           // Update our own previous report rather than stacking a new one.
-          const MARKER = '<!-- agentic-workflow:run-report -->';
           const body = [MARKER, ...lines].join('\n');
-
-          const { data: existing } = await github.rest.issues.listComments({
-            owner: context.repo.owner, repo: context.repo.repo,
-            issue_number: n, per_page: 100,
-          });
-          const mine = existing.find(c => c.body && c.body.includes(MARKER));
 
           if (mine) {
             await github.rest.issues.updateComment({
