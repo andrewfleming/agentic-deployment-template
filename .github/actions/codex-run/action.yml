@@ -6,9 +6,9 @@ description: >-
 # What this is
 #
 # A single definition of how this repository runs the Codex agent. Four
-# workflows need to invoke it — implementing an issue directly, writing a plan
-# for a complex one, implementing an approved plan, and responding to a review
-# comment on an open pull request — and all four call this action rather than
+# workflows need to invoke it. They implement an issue directly, write a plan
+# for a complex one, implement an approved plan, and respond to a review
+# comment on an open pull request. All four call this action rather than
 # `openai/codex-action` directly.
 #
 # The reason to centralise it is the sandbox setting below. An agent run takes
@@ -64,7 +64,7 @@ inputs:
   report_issue_number:
     description: >-
       Issue to report a do-nothing run on. Leave empty to write the job summary
-      only — codex-pr-feedback.yml runs against a pull request comment, where
+      only. codex-pr-feedback.yml runs against a pull request comment, where
       there is no issue to report to.
     required: false
     default: ""
@@ -131,7 +131,7 @@ runs:
             instruction,
             '',
             'Make the change on the pull request\'s existing branch, which is already',
-            'checked out. Commit and push to that same branch — do NOT open a new pull',
+            'checked out. Commit and push to that same branch. Do NOT open a new pull',
             'request. If the request is unclear, comment on the pull request asking for',
             'clarification rather than guessing.',
           ].join('\n'));
@@ -159,9 +159,9 @@ runs:
         # This is permissive, and the name is meant to make you look twice, so
         # it is worth stating why it is set. The run exists to push a branch and
         # open a pull request, so it needs the network. The sandbox choices are
-        # coarse — read-only, workspace-write, or this — with no way to say
-        # "network access for git and gh, nothing else". Of the three, this is
-        # the only one that lets the run finish its job.
+        # coarse. They are read-only, workspace-write, or this, with no way to
+        # say "network access for git and gh, nothing else". Of the three, this
+        # is the only one that lets the run finish its job.
         #
         # So this setting is not what keeps an agent run safe. What keeps it
         # safe is that only a repository collaborator with write access can
@@ -248,8 +248,8 @@ runs:
             `Full detail: [job summary and log](${runUrl}). The job summary carries the`,
             'agent\'s own closing message, which is usually where it says why it stopped.',
             '',
-            'Codex reports no turn count, cost or permission-denial count — the action',
-            'exposes only its final message — so unlike the Claude path there are no run',
+            'Codex reports no turn count, cost or permission-denial count. The action',
+            'exposes only its final message, so unlike the Claude path there are no run',
             'statistics to check here.',
             '',
             'A run that changes nothing and reports success is the failure this template',

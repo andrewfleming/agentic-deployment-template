@@ -34,7 +34,7 @@ jobs:
     # every unnamed one to none, which leaves the token unable to read the
     # repository. On a private repository GitHub answers an unauthorised read
     # with a 404 rather than a 403, so the checkout reports
-    # "remote: Repository not found" and retries twice before failing — which
+    # "remote: Repository not found" and retries twice before failing. That
     # reads as a wrong URL or a deleted repository, not a missing scope.
     #
     # A public repository checks out fine without it, so this stays working

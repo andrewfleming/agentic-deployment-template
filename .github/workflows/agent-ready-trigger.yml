@@ -414,11 +414,11 @@ jobs:
   # complexity:low/medium (or no complexity label) → implement directly and
   #                    open a pull request.
   #
-  # The four checks before the agent runs — write access, label set, issue
-  # structure, no existing pull request — are the same ones the Claude job
-  # above performs, and for the same reasons. They decide whether an agent run
-  # should happen at all, which is a question that has nothing to do with which
-  # agent it is. Change one job's checks and the other should change with it.
+  # Four checks run before the agent does: write access, label set, issue
+  # structure, and no existing pull request. They are the same ones the Claude
+  # job above performs, and for the same reasons. They decide whether an agent
+  # run should happen at all, which is a question that has nothing to do with
+  # which agent it is. Change one job's checks and the other should change too.
   # ─────────────────────────────────────────────────────────────────────────────
   trigger-openai-codex:
     if: |
@@ -442,9 +442,10 @@ jobs:
       # This check, not the agent's sandbox, is what makes an agent run safe.
       #
       # The run holds a token that can write to the repository, and it takes
-      # the issue body as its instructions — text written by whoever opened the
-      # issue. So the question that matters is who is allowed to start one, and
-      # the answer enforced here is: only a collaborator with write access.
+      # the issue body as its instructions. That text is written by whoever
+      # opened the issue. So the question that matters is who is allowed to
+      # start a run, and the answer enforced here is a collaborator with write
+      # access, nobody else.
       #
       # The upstream action offers a similar check of its own. This one stays
       # regardless, so that the rule is stated in this repository's own files

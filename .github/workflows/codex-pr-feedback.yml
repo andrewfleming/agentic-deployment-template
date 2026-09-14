@@ -89,11 +89,11 @@ jobs:
               permLevel = 'none';
             }
             const allowed = ['write', 'admin'].includes(permLevel);
-            console.log(`Commenter ${commenter} has permission: ${permLevel} — allowed: ${allowed}`);
+            console.log(`Commenter ${commenter} has permission: ${permLevel}. Allowed: ${allowed}`);
             if (!allowed && prNumber) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber,
-                body: `@${commenter} Only collaborators with write access can drive \`@codex\` here — request ignored.`,
+                body: `@${commenter} Only collaborators with write access can drive \`@codex\` here. Request ignored.`,
               });
             }
             core.setOutput('allowed', allowed ? 'true' : 'false');
