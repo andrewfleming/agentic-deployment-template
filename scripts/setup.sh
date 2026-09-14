@@ -7,6 +7,25 @@
 # Or clone and run locally:
 #   bash /path/to/agentic-deployment-template/scripts/setup.sh
 #
+# Updating a repository that already has the template:
+#   Pass --update. Without it every file that already exists is skipped, which
+#   is right for a first install and useless for picking up a later fix.
+#
+#     bash /path/to/agentic-deployment-template/scripts/setup.sh --update
+#
+#   --update overwrites the files this template owns, and refuses to run while
+#   .github/ or scripts/ has uncommitted changes, so git is always the undo.
+#   Review the result with `git diff` before committing.
+#
+#   .github/LABELS.yml is never overwritten, because the documented way to
+#   adopt it is to merge its entries into a file you already have. Overwriting
+#   would silently delete labels that are yours.
+#
+#   Two files are meant to be edited per project: the allow list in
+#   .github/actions/claude-run/action.yml and the sandbox in
+#   .github/actions/codex-run/action.yml. An update replaces both. Re-apply
+#   your changes afterwards; the summary reminds you if either one moved.
+#
 # Installing from a fork or a mirror:
 #   Set TEMPLATE_REPO_URL to the raw base URL of the copy you want, and
 #   TEMPLATE_DOCS_URL to its web URL. Both are optional.
@@ -23,7 +42,8 @@
 #   - Adds .github/ISSUE_TEMPLATE/agent-ready.md       (alongside existing templates)
 #   - Adds .github/PULL_REQUEST_TEMPLATE/agent-generated.md  (alongside existing templates)
 #   - Adds .github/LABELS.yml  (or prints merge instructions if one already exists)
-#   - Adds .github/workflows/  (all agent workflow files, skips any that already exist)
+#   - Adds .github/workflows/  (all agent workflow files, skips any that already
+#     exist, or replaces them with --update)
 #   - Adds .github/agents/issue-screener.agent.md
 #   - Adds scripts/validate-workflows.sh  (the workflow YAML + permission guard)
 #   - Adds .github/actions/claude-run/       (the shared Claude invocation)
@@ -50,6 +70,34 @@
 #   PULL_REQUEST_TEMPLATE/ directory alongside it (both work at the same time).
 
 set -euo pipefail
+
+UPDATE_MODE="no"
+for arg in "$@"; do
+  case "$arg" in
+    --update)
+      UPDATE_MODE="yes"
+      ;;
+    -h|--help)
+      sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//; $d'
+      exit 0
+      ;;
+    *)
+      printf '\033[0;31mUnknown option: %s\033[0m\n' "$arg" >&2
+      printf 'Run with --help for usage.\n' >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Counters for the closing summary. In update mode the useful number is how
+# many files actually changed, not how many were considered: a run that
+# rewrites nothing should say so rather than printing fourteen lines that all
+# look like work.
+ADDED=0
+UPDATED=0
+UNCHANGED=0
+SKIPPED=0
+CUSTOMISED_FILE_CHANGED="no"
 
 REPO_URL_EXPLICIT="${TEMPLATE_REPO_URL:+yes}"
 REPO_URL="${TEMPLATE_REPO_URL:-https://raw.githubusercontent.com/whyisjake/agentic-deployment-template/main}"
@@ -110,11 +158,79 @@ fetch() {
   fi
 }
 
+# Install a file, or update one that is already there.
+#
+# The rule differs by mode, and the difference is the whole point of --update:
+# an existing file is left alone on a first install and replaced on an update.
+# In update mode the file is fetched to a temporary path first so an unchanged
+# file can be reported as unchanged rather than rewritten, which keeps the
+# summary honest and leaves mtimes alone.
+place() {
+  local src="$1" dest="$2"
+
+  if [[ ! -f "$dest" ]]; then
+    fetch "$src" "$dest"
+    green "  added: $dest"
+    ADDED=$((ADDED + 1))
+    return
+  fi
+
+  if [[ "$UPDATE_MODE" != "yes" ]]; then
+    yellow "  skipped (already exists): $dest"
+    SKIPPED=$((SKIPPED + 1))
+    return
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  fetch "$src" "$tmp"
+
+  if cmp -s "$tmp" "$dest"; then
+    dim "  unchanged: $dest"
+    UNCHANGED=$((UNCHANGED + 1))
+    rm -f "$tmp"
+    return
+  fi
+
+  cat "$tmp" > "$dest"
+  rm -f "$tmp"
+  green "  updated: $dest"
+  UPDATED=$((UPDATED + 1))
+
+  # The two files the template tells you to edit. Replacing them is correct
+  # and also destroys local customisation, so the summary has to say so.
+  case "$dest" in
+    *"/claude-run/action.yml"|*"/codex-run/action.yml")
+      CUSTOMISED_FILE_CHANGED="yes"
+      ;;
+  esac
+}
+
 # ── Preflight ─────────────────────────────────────────────────────────────────
 
 if [[ ! -d ".git" ]]; then
   red "Error: run this script from the root of a git repository."
   exit 1
+fi
+
+# Update mode overwrites files in place and keeps no backups, on the basis
+# that the target is a git repository and git is a better undo than a pile of
+# .bak files. That reasoning only holds while the relevant paths are clean, so
+# this checks rather than assumes.
+if [[ "$UPDATE_MODE" == "yes" ]]; then
+  dirty="$(git status --porcelain -- .github scripts 2>/dev/null || true)"
+  if [[ -n "$dirty" ]]; then
+    red "Error: .github/ or scripts/ has uncommitted changes."
+    echo ""
+    printf '%s\n' "$dirty" | sed 's/^/      /'
+    echo ""
+    echo  "  --update overwrites these files and keeps no backups, because the"
+    echo  "  intended way to undo it is git. That does not work if the changes"
+    echo  "  were never committed."
+    echo ""
+    echo  "  Commit or stash them, then run this again."
+    exit 1
+  fi
 fi
 
 bold ""
@@ -131,12 +247,7 @@ if [[ -d ".github/ISSUE_TEMPLATE" ]]; then
   dim "  .github/ISSUE_TEMPLATE/ already exists — adding agent-ready.md alongside your existing templates"
 fi
 
-if [[ -f ".github/ISSUE_TEMPLATE/agent-ready.md" ]]; then
-  yellow "  skipped (already exists): .github/ISSUE_TEMPLATE/agent-ready.md"
-else
-  fetch ".github/ISSUE_TEMPLATE/agent-ready.md" ".github/ISSUE_TEMPLATE/agent-ready.md"
-  green "  added: .github/ISSUE_TEMPLATE/agent-ready.md"
-fi
+place ".github/ISSUE_TEMPLATE/agent-ready.md" ".github/ISSUE_TEMPLATE/agent-ready.md"
 
 # ── PR template ───────────────────────────────────────────────────────────────
 # GitHub supports multiple named PR templates in PULL_REQUEST_TEMPLATE/.
@@ -148,22 +259,26 @@ if [[ -f ".github/pull_request_template.md" ]]; then
   dim "  (GitHub uses named templates when PULL_REQUEST_TEMPLATE/ exists; your existing template is unaffected)"
 fi
 
-if [[ -f ".github/PULL_REQUEST_TEMPLATE/agent-generated.md" ]]; then
-  yellow "  skipped (already exists): .github/PULL_REQUEST_TEMPLATE/agent-generated.md"
-else
-  fetch ".github/PULL_REQUEST_TEMPLATE/agent-generated.md" ".github/PULL_REQUEST_TEMPLATE/agent-generated.md"
-  green "  added: .github/PULL_REQUEST_TEMPLATE/agent-generated.md"
-fi
+place ".github/PULL_REQUEST_TEMPLATE/agent-generated.md" ".github/PULL_REQUEST_TEMPLATE/agent-generated.md"
 
 # ── LABELS.yml ────────────────────────────────────────────────────────────────
+# Never overwritten, not even by --update, and this is the one exception to
+# that flag.
+#
+# Every other file here belongs to the template. This one is a file you are
+# told to merge the template's entries into, so by the time an update runs it
+# may hold labels that exist nowhere upstream. Replacing it would delete them
+# with no warning and no way to tell what was lost.
 
 if [[ -f ".github/LABELS.yml" ]]; then
-  yellow "  skipped (already exists): .github/LABELS.yml"
-  echo   "  → To add agent labels, append these entries to your existing LABELS.yml:"
+  yellow "  skipped (never overwritten): .github/LABELS.yml"
+  echo   "  → To add or refresh agent labels, merge these entries into your own file:"
   echo   "    $LABELS_SOURCE"
+  SKIPPED=$((SKIPPED + 1))
 else
   fetch ".github/LABELS.yml" ".github/LABELS.yml"
   green "  added: .github/LABELS.yml"
+  ADDED=$((ADDED + 1))
 fi
 
 # ── Workflows ────────────────────────────────────────────────────────────────
@@ -182,22 +297,12 @@ WORKFLOW_FILES=(
 )
 
 for file in "${WORKFLOW_FILES[@]}"; do
-  if [[ -f "$file" ]]; then
-    yellow "  skipped (already exists): $file"
-  else
-    fetch "$file" "$file"
-    green "  added: $file"
-  fi
+  place "$file" "$file"
 done
 
 # ── Agent file ────────────────────────────────────────────────────────────────
 
-if [[ -f ".github/agents/issue-screener.agent.md" ]]; then
-  yellow "  skipped (already exists): .github/agents/issue-screener.agent.md"
-else
-  fetch ".github/agents/issue-screener.agent.md" ".github/agents/issue-screener.agent.md"
-  green "  added: .github/agents/issue-screener.agent.md"
-fi
+place ".github/agents/issue-screener.agent.md" ".github/agents/issue-screener.agent.md"
 
 # ── Composite actions ─────────────────────────────────────────────────────────
 # The workflows call ./.github/actions/claude-run and ./.github/actions/codex-run
@@ -213,12 +318,7 @@ fi
 # someone switches provider, which is the worst time to discover it.
 
 for action in claude-run codex-run screen-issue; do
-  if [[ -f ".github/actions/$action/action.yml" ]]; then
-    yellow "  skipped (already exists): .github/actions/$action/action.yml"
-  else
-    fetch ".github/actions/$action/action.yml" ".github/actions/$action/action.yml"
-    green "  added: .github/actions/$action/action.yml"
-  fi
+  place ".github/actions/$action/action.yml" ".github/actions/$action/action.yml"
 done
 
 # ── Scripts ───────────────────────────────────────────────────────────────────
@@ -227,13 +327,8 @@ done
 # validate-workflows.yml runs it in CI. Installing the workflow without the
 # script would leave the guard broken in the one repo that needs it.
 
-if [[ -f "scripts/validate-workflows.sh" ]]; then
-  yellow "  skipped (already exists): scripts/validate-workflows.sh"
-else
-  fetch "scripts/validate-workflows.sh" "scripts/validate-workflows.sh"
-  chmod +x "scripts/validate-workflows.sh"
-  green "  added: scripts/validate-workflows.sh"
-fi
+place "scripts/validate-workflows.sh" "scripts/validate-workflows.sh"
+chmod +x "scripts/validate-workflows.sh"
 
 # ── docs/ directory ───────────────────────────────────────────────────────────
 
@@ -394,6 +489,52 @@ else
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
+#
+# An update and a first install need different closing advice. After an update
+# the labels are already synced, the provider is already chosen and the app is
+# already installed, so printing the install checklist again is noise that
+# hides the one thing worth reading: what changed.
+
+if [[ "$UPDATE_MODE" == "yes" ]]; then
+  echo ""
+  if [[ "$UPDATED" -eq 0 ]]; then
+    bold "Already up to date."
+    echo ""
+    echo "  $UNCHANGED file(s) checked, none changed."
+    echo ""
+    echo "  Full docs: $DOCS_URL"
+    echo ""
+    exit 0
+  fi
+
+  bold "Updated $UPDATED file(s). $UNCHANGED unchanged."
+  echo ""
+
+  if [[ "$CUSTOMISED_FILE_CHANGED" == "yes" ]]; then
+    yellow "  One of the files you are meant to customise was replaced."
+    echo   "  The allow list in .github/actions/claude-run/action.yml and the"
+    echo   "  sandbox in .github/actions/codex-run/action.yml hold per-project"
+    echo   "  settings, such as the test command your agent is permitted to run."
+    echo   "  Check the diff and re-apply anything of yours that went missing."
+    echo ""
+  fi
+
+  echo "  1. Read what changed before you keep it:"
+  echo "     git diff"
+  echo ""
+  echo "  2. Commit and push:"
+  echo "     git add .github/ scripts/"
+  echo "     git commit -m 'chore: update agentic deployment template'"
+  echo "     git push"
+  echo ""
+  echo "  3. Push to your DEFAULT branch, not just a feature branch."
+  echo "     Workflows triggered by issues and comments always run the copy on"
+  echo "     the default branch, so a change parked on a branch does nothing."
+  echo ""
+  echo "  Full docs: $DOCS_URL"
+  echo ""
+  exit 0
+fi
 
 echo ""
 bold "Done. Next steps:"
@@ -412,13 +553,20 @@ echo ""
 echo "  4. Agent provider:"
 echo "     $PROVIDER_NEXT_STEP"
 echo ""
-echo "  5. Install the Claude GitHub App (needed as these workflows are written):"
-echo "     Easiest: run /install-github-app from Claude Code — it does the app"
-echo "     and the secret together, and you may have done it already."
-echo "     Otherwise: https://github.com/apps/claude -> Configure -> this repo"
-echo ""
-echo "     Without it, runs fail in ~29 seconds on a 401 at the app token"
-echo "     exchange, even though labels sync and the workflow fires."
-echo ""
+
+# Only the claude provider needs the app. Printing this under openai-codex
+# sends people to install something their setup never uses, and quietly
+# implies their agent is misconfigured when it is not.
+if [[ "${provider:-claude}" == "claude" ]]; then
+  echo "  5. Install the Claude GitHub App (needed as these workflows are written):"
+  echo "     Easiest: run /install-github-app from Claude Code — it does the app"
+  echo "     and the secret together, and you may have done it already."
+  echo "     Otherwise: https://github.com/apps/claude -> Configure -> this repo"
+  echo ""
+  echo "     Without it, runs fail in ~29 seconds on a 401 at the app token"
+  echo "     exchange, even though labels sync and the workflow fires."
+  echo ""
+fi
+
 echo "  Full docs: $DOCS_URL"
 echo ""

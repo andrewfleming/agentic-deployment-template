@@ -106,6 +106,23 @@ The auto-labeler does not apply `agent-ready` and cannot start a run. It applies
 
 Add the complexity label **before** `agent-ready`, and this order matters. Only the `agent-ready` label starts a run, and the trigger then reads the issue's full label set from the API — so a `complexity:high` issue that gains its complexity label *after* `agent-ready` has already fired will have taken the direct path and skipped planning.
 
+### Updating a repo that already has the template
+
+`setup.sh` skips every file that already exists, which is correct for a first install and useless afterwards. To pull in later fixes, pass `--update`:
+
+```bash
+bash /path/to/agentic-deployment-template/scripts/setup.sh --update
+```
+
+It replaces the files the template owns, reports which ones actually changed, and leaves the rest alone. Two guard rails:
+
+- **It refuses to run while `.github/` or `scripts/` has uncommitted changes.** No backup files are written, because the target is a git repository and `git diff` is a better undo than a pile of `.bak`. That only holds if your work is committed first.
+- **`.github/LABELS.yml` is never overwritten.** You are told to merge the template's entries into your own file, so by update time it may hold labels that exist nowhere upstream. It prints the source path instead.
+
+One thing to watch: the allow list in `claude-run/action.yml` and the sandbox in `codex-run/action.yml` are meant to be edited per project, and an update replaces both. The summary says so when either one changed. Re-apply your test commands and check the diff before committing.
+
+Changes only take effect once they reach your **default branch**. Workflows triggered by issues and comments always run the copy on the default branch, so an update sitting on a feature branch does nothing.
+
 ### Workflow and permission guard
 
 `scripts/validate-workflows.sh` does two things, and CI runs it on any PR touching a workflow.
