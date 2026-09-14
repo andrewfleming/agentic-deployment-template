@@ -233,10 +233,36 @@ if [[ "$UPDATE_MODE" == "yes" ]]; then
   fi
 fi
 
+# Which GitHub repository this run will write its variable to.
+#
+# Resolved once, printed, and passed to every gh call with --repo. A bare gh
+# command resolves against the current directory's remotes on its own, and a
+# clone with more than one remote takes whichever gh prefers rather than the
+# one you have in mind. The case that hurts is a clone whose `origin` is a
+# shared or production repository and whose personal copy sits on a second
+# remote: the variable lands on the shared one, quietly, and a later check for
+# the provider's secret then reads that same wrong repository and reports the
+# secret missing when it is present on the right one.
+#
+# Override with TARGET_REPO=owner/name if the resolved value is not the one
+# you want.
+TARGET_REPO="${TARGET_REPO:-}"
+if [[ -z "$TARGET_REPO" ]] && command -v gh >/dev/null 2>&1; then
+  TARGET_REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
+fi
+
 bold ""
 bold "Agentic Deployment Template — Setup"
 echo  "Adding agent-ready workflow files to: $(basename "$(pwd)")"
 echo  "Installing from: $SOURCE_DESC"
+if [[ -n "$TARGET_REPO" ]]; then
+  echo  "GitHub repository:  $TARGET_REPO"
+  remote_count="$(git remote 2>/dev/null | grep -c . || true)"
+  if [[ "${remote_count:-0}" -gt 1 ]]; then
+    yellow "  This clone has $remote_count remotes. Settings will be written to $TARGET_REPO."
+    dim    "  If that is the wrong one, re-run with TARGET_REPO=owner/name."
+  fi
+fi
 echo  ""
 
 # ── Issue template ────────────────────────────────────────────────────────────
@@ -364,6 +390,23 @@ bold "Agent provider"
 
 if [[ -n "${SKIP_AGENT_SETUP:-}" ]]; then
   dim "  SKIP_AGENT_SETUP is set — leaving AGENT_PROVIDER alone."
+elif [[ "$UPDATE_MODE" == "yes" ]]; then
+  # An update must never ask this question.
+  #
+  # The provider was chosen when the template was installed. The prompt below
+  # defaults to claude on an empty return, so asking again during an update
+  # puts a working openai-codex repository one keystroke away from being
+  # switched to a provider it holds no credentials for. Nothing about
+  # refreshing files justifies that risk.
+  current=""
+  if [[ -n "$TARGET_REPO" ]] && command -v gh >/dev/null 2>&1; then
+    current="$(gh variable list --repo "$TARGET_REPO" 2>/dev/null | awk '$1 == "AGENT_PROVIDER" { print $2 }')"
+  fi
+  if [[ -n "$current" ]]; then
+    dim "  Leaving AGENT_PROVIDER as it is: $current"
+  else
+    dim "  Leaving AGENT_PROVIDER alone (not set on $TARGET_REPO, or not readable from here)."
+  fi
 else
   provider="${AGENT_PROVIDER:-}"
 
@@ -405,14 +448,14 @@ else
   variable_set="no"
   if ! command -v gh >/dev/null 2>&1; then
     yellow "  gh CLI not found — AGENT_PROVIDER not set"
-  elif ! gh repo view >/dev/null 2>&1; then
+  elif [[ -z "$TARGET_REPO" ]]; then
     yellow "  gh cannot see a GitHub repo here — AGENT_PROVIDER not set"
     dim   "  (the repo may not be pushed yet, or gh may not be logged in to its host: gh auth login)"
-  elif gh variable set AGENT_PROVIDER --body "$provider" >/dev/null 2>&1; then
-    green "  set: AGENT_PROVIDER=$provider"
+  elif gh variable set AGENT_PROVIDER --body "$provider" --repo "$TARGET_REPO" >/dev/null 2>&1; then
+    green "  set: AGENT_PROVIDER=$provider  (on $TARGET_REPO)"
     variable_set="yes"
   else
-    yellow "  could not set AGENT_PROVIDER — your gh token may lack permission on this repo"
+    yellow "  could not set AGENT_PROVIDER — your gh token may lack permission on $TARGET_REPO"
   fi
 
   if [[ "$variable_set" == "no" ]]; then
@@ -474,7 +517,7 @@ else
   if [[ -z "$secret" ]]; then
     dim "  Provider '$provider' has no single required secret — its credentials are yours to wire up."
   else
-    if [[ "$variable_set" == "yes" ]] && gh secret list 2>/dev/null | awk '{print $1}' | grep -qx "$secret"; then
+    if [[ "$variable_set" == "yes" ]] && gh secret list --repo "$TARGET_REPO" 2>/dev/null | awk '{print $1}' | grep -qx "$secret"; then
       green "  found: $secret is already set"
       PROVIDER_NEXT_STEP="Provider is $provider and $secret is set — you are ready to label an issue."
     else
